@@ -101,7 +101,6 @@
             line-height: 1.7;
             margin-top: 10px;
         }
-        /* 隠しインプット（レジストリも汚さないピュアなHTML要素） */
         #file-input {
             display: none;
         }
@@ -111,10 +110,9 @@
 
     <div class="safety-bar"></div>
     <h1>🟢 安全第一：低音事故防止チェッカー</h1>
-    <div class="version-tag">SYSTEM VERSION: v1.0.1-yoshi</div>
+    <div class="version-tag">SYSTEM VERSION: v1.0.2-yoshi</div>
     <div class="genba-sign">⚠️ 危険：30Hz以下の居眠り・位相のねじれに注意せよ！</div>
 
-    <!-- クリック・ドロップ両対応エリア -->
     <div id="drop-zone">【ここにWAVをドロップ】 または 【クリックしてファイルを選択】</div>
     <input type="file" id="file-input" accept="audio/*">
 
@@ -170,19 +168,19 @@
         tempCtx.fillStyle = '#050803';
         tempCtx.fillRect(0, 0, 760, 180);
 
-        // クリックしたら隠しダイアログを発火させるフォールバック
+        // クリックイベントでダイアログを開く
         dropZone.addEventListener('click', () => {
             fileInput.click();
         });
 
-        // ダイアログで選択された時の処理
+        // ダイアログ経由でファイルが選ばれた時のバグを修正
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                initAudio(e.target.files[0]);
+                initAudio(e.target.files[0]); // 最初の1ファイルだけを正しく渡す
             }
         });
 
-        // ドロップ時の処理
+        // ドロップ経由でファイルが落とされた時のバグを修正
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('hover'); });
         dropZone.addEventListener('drop', (e) => {
@@ -190,17 +188,23 @@
             dropZone.classList.remove('hover');
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                initAudio(files[0]);
+                initAudio(files[0]); // 最初の1ファイルだけを正しく渡す
             }
         });
 
-        async function initAudio(file) {
+        async function initAudio(fileObject) {
+            // 渡されたオブジェクトが正しいファイルか最終確認
+            if (!fileObject || !fileObject.name) {
+                statusText.innerText = "エラー：ファイルオブジェクトが不正です";
+                return;
+            }
+
             try {
                 if (isPlaying) stopAudio();
                 statusText.innerText = "デコード中...";
                 
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const arrayBuffer = await file.arrayBuffer();
+                const arrayBuffer = await fileObject.arrayBuffer();
                 audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
                 
                 analyser = audioCtx.createAnalyser();
@@ -208,7 +212,7 @@
                 bufferLength = analyser.frequencyBinCount;
                 dataArray = new Uint8Array(bufferLength);
                 
-                dropZone.innerText = `安全確認対象: ${file.name}`;
+                dropZone.innerText = `安全確認対象: ${fileObject.name}`;
                 statusText.innerText = "スタンバイ完了 (ヨシ！)";
             } catch (err) {
                 statusText.innerText = "エラー：音声ファイルが読めません";
@@ -288,8 +292,3 @@
             }
             
             ctxSpec.fillStyle = '#888';
-            ctxSpec.font = '11px sans-serif';
-            ctxSpec.fillText('← 低音域 (30Hz-100Hz)', 10, 20);
-            ctxSpec.fillText('中高音域 →', 680, 20);
-
-            tempCtx.clearRect(0, 0, 760, 180);

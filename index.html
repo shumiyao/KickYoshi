@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>安全第一：低音事故防止チェッカー (Low-End Genba Checker)</title>
+    <title>安全第一：低音事故防止チェッカー (KickYoshi)</title>
     <style>
         body {
             background-color: #1e221a;
@@ -14,7 +14,6 @@
             flex-direction: column;
             align-items: center;
         }
-        /* 現場の虎模様ストライプ */
         .safety-bar {
             width: 100%;
             height: 15px;
@@ -64,6 +63,7 @@
             border: 1px solid #006633;
             width: 100%;
             height: 180px;
+            display: block;
         }
         .controls {
             display: flex;
@@ -90,10 +90,6 @@
             border: 2px solid #ff3333;
             font-size: 13px;
             line-height: 1.7;
-        }
-        .yoshi-btn {
-            color: #ff3333;
-            font-weight: bold;
         }
     </style>
 </head>
@@ -134,29 +130,26 @@
         const playBtn = document.getElementById('play-btn');
         const monoChk = document.getElementById('mono-chk');
         
-        let audioCtx, audioBuffer, sourceNode, gainNode, stereoNode;
+        let audioCtx, audioBuffer, sourceNode, gainNode;
         let analyser, dataArray, bufferLength;
         let isPlaying = false;
         
-        // キャンバス設定
         const canvasSpec = document.getElementById('spectrum');
         const ctxSpec = canvasSpec.getContext('2d');
         const canvasSg = document.getElementById('spectrogram');
         const ctxSg = canvasSg.getContext('2d');
         
-        // スペクトログラムのスクロール用
         let tempCanvas = document.createElement('canvas');
         let tempCtx = tempCanvas.getContext('2d');
 
-        // ドロップイベント
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('hover'); });
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('hover');
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.match('audio.*')) {
-                initAudio(file);
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].type.match('audio.*')) {
+                initAudio(files[0]);
             }
         });
 
@@ -167,25 +160,32 @@
             const arrayBuffer = await file.arrayBuffer();
             audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             
-            // アナライザー設定
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 2048;
             bufferLength = analyser.frequencyBinCount;
             dataArray = new Uint8Array(bufferLength);
             
-            // キャンバスサイズ同期
-            canvasSpec.width = canvasSpec.parentElement.clientWidth;
-            canvasSpec.height = 200;
-            canvasSg.width = canvasSg.parentElement.clientWidth;
-            canvasSg.height = 200;
-            tempCanvas.width = canvasSg.width;
-            tempCanvas.height = canvasSg.height;
-
+            // コンテナをまず表示させて、DOM上の横幅を確定させる（サイズ0防止）
             container.style.display = 'block';
-            dropZone.innerText = `読み込み完了: ${file.name}`;
             
-            // 描画ループ開始
-            draw();
+            // 確定した横幅を取得（取得できない場合はデフォルト800）
+            const w = canvasSpec.parentElement.clientWidth || 800;
+            const h = 180;
+            
+            canvasSpec.width = w;
+            canvasSpec.height = h;
+            canvasSg.width = w;
+            canvasSg.height = h;
+            tempCanvas.width = w;
+            tempCanvas.height = h;
+
+            dropZone.innerText = `安全確認対象: ${file.name}`;
+            
+            // 最初の一回だけ背景を黒で塗りつぶす（エラー防止）
+            ctxSg.fillStyle = '#050803';
+            ctxSg.fillRect(0, 0, w, h);
+            tempCtx.fillStyle = '#050803';
+            tempCtx.fillRect(0, 0, w, h);
         }
 
         function playAudio() {
@@ -197,7 +197,6 @@
             
             gainNode = audioCtx.createGain();
             
-            // モノラル化のルーティング
             if (monoChk.checked) {
                 gainNode.channelCount = 1;
                 gainNode.channelCountMode = "explicit";
@@ -212,7 +211,10 @@
             
             sourceNode.start(0);
             isPlaying = true;
-            playBtn.innerText = "停止";
+            playBtn.innerText = "確認停止";
+            
+            // 再生が始まったら描画ループを回す
+            draw();
         }
 
         function stopAudio() {
@@ -221,7 +223,7 @@
                 sourceNode.disconnect();
             }
             isPlaying = false;
-            playBtn.innerText = "再生";
+            playBtn.innerText = "再生確認";
         }
 
         playBtn.addEventListener('click', () => {
@@ -236,12 +238,15 @@
         });
 
         function draw() {
+            if (!isPlaying || !analyser) return;
             requestAnimationFrame(draw);
-            if (!analyser) return;
 
-            // ① スペクトラム（周波数）表示の描画
+            // キャンバスサイズが正常か再チェック（安全対策）
+            if (canvasSg.width === 0 || canvasSg.height === 0) return;
+
+            // ① スペクトラム（周波数）の描画
             analyser.getByteFrequencyData(dataArray);
-            ctxSpec.fillStyle = '#000';
+            ctxSpec.fillStyle = '#050803';
             ctxSpec.fillRect(0, 0, canvasSpec.width, canvasSpec.height);
             
             let barWidth = (canvasSpec.width / bufferLength) * 2.5;
@@ -250,39 +255,34 @@
 
             for(let i = 0; i < bufferLength; i++) {
                 barHeight = dataArray[i];
-                // 低音域を強調して見せるための簡易マッピング
-                ctxSpec.fillStyle = `rgb(${barHeight+50}, 0, ${255-barHeight})`;
-                ctxSpec.fillRect(x, canvasSpec.height - barHeight/1.2, barWidth, barHeight/1.2);
+                ctxSpec.fillStyle = `rgb(${barHeight+30}, ${barHeight*0.8}, 30)`;
+                ctxSpec.fillRect(x, canvasSpec.height - barHeight/1.5, barWidth, barHeight/1.5);
                 x += barWidth + 1;
             }
             
-            // 周波数ガイド（目安）
             ctxSpec.fillStyle = '#888';
-            ctxSpec.font = '10px sans-serif';
-            ctxSpec.fillText('低音 (30Hz-100Hz)', 10, canvasSpec.height - 10);
-            ctxSpec.fillText('中高音 (1kHz-)', canvasSpec.width - 100, canvasSpec.height - 10);
+            ctxSpec.font = '11px sans-serif';
+            ctxSpec.fillText('← 低音域 (30Hz-100Hz)', 10, 20);
+            ctxSpec.fillText('中高音域 →', canvasSpec.width - 80, 20);
 
-            // ② スペクトログラム（滝）の描画
-            if (isPlaying) {
-                // 既存の絵を左に1ピクセルシフト
-                tempCtx.drawImage(canvasSg, 0, 0);
-                ctxSg.clearRect(0, 0, canvasSg.width, canvasSg.height);
-                ctxSg.drawImage(tempCanvas, -1, 0);
+            // ② スペクトログラム（滝）の描画（サイズ0チェック通過後なので安全）
+            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+            tempCtx.drawImage(canvasSg, 0, 0);
+            
+            ctxSg.clearRect(0, 0, canvasSg.width, canvasSg.height);
+            ctxSg.drawImage(tempCanvas, -1, 0);
 
-                // 右端に新しい1列を描画
-                for (let i = 0; i < canvasSg.height; i++) {
-                    // 低音を下、高音を上に配置するためのインデックス調整
-                    let logIndex = Math.floor(Math.pow(i / canvasSg.height, 2) * (bufferLength / 4));
-                    let value = dataArray[logIndex] || 0;
-                    
-                    // 色の計算（超低音ほど赤く、中音が黄色、高音が青）
-                    let r = value > 150 ? value : 0;
-                    let g = value;
-                    let b = value < 100 ? value * 2 : 50;
-                    
-                    ctxSg.fillStyle = `rgb(${r},${g},${b})`;
-                    ctxSg.fillRect(canvasSg.width - 1, canvasSg.height - i, 1, 1);
-                }
+            for (let i = 0; i < canvasSg.height; i++) {
+                let logIndex = Math.floor(Math.pow(i / canvasSg.height, 2) * (bufferLength / 4));
+                let value = dataArray[logIndex] || 0;
+                
+                // 現場カラー（緑から黄色、危険な低音過多は赤へ）
+                let r = value > 140 ? value : 0;
+                let g = value > 50 ? value : 30;
+                let b = value < 80 ? value : 0;
+                
+                ctxSg.fillStyle = `rgb(${r},${g},${b})`;
+                ctxSg.fillRect(canvasSg.width - 1, canvasSg.height - i, 1, 1);
             }
         }
     </script>

@@ -54,6 +54,7 @@
             color: #ffcc00;
             transition: 0.3s;
             margin-bottom: 20px;
+            text-align: center;
         }
         #drop-zone.hover { background: #353f2d; border-color: #fff; color: #fff; }
         .container {
@@ -100,16 +101,22 @@
             line-height: 1.7;
             margin-top: 10px;
         }
+        /* 隠しインプット（レジストリも汚さないピュアなHTML要素） */
+        #file-input {
+            display: none;
+        }
     </style>
 </head>
 <body>
 
     <div class="safety-bar"></div>
     <h1>🟢 安全第一：低音事故防止チェッカー</h1>
-    <div class="version-tag">SYSTEM VERSION: v1.0.0-yoshi</div>
+    <div class="version-tag">SYSTEM VERSION: v1.0.1-yoshi</div>
     <div class="genba-sign">⚠️ 危険：30Hz以下の居眠り・位相のねじれに注意せよ！</div>
 
-    <div id="drop-zone">【ここにWAVをドロップ】 音響安全確認を行う </div>
+    <!-- クリック・ドロップ両対応エリア -->
+    <div id="drop-zone">【ここにWAVをドロップ】 または 【クリックしてファイルを選択】</div>
+    <input type="file" id="file-input" accept="audio/*">
 
     <div class="container" id="analyzer-container">
         <div class="controls">
@@ -137,6 +144,7 @@
 
     <script>
         const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
         const playBtn = document.getElementById('play-btn');
         const monoChk = document.getElementById('mono-chk');
         const statusText = document.getElementById('status-text');
@@ -162,6 +170,19 @@
         tempCtx.fillStyle = '#050803';
         tempCtx.fillRect(0, 0, 760, 180);
 
+        // クリックしたら隠しダイアログを発火させるフォールバック
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // ダイアログで選択された時の処理
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                initAudio(e.target.files[0]);
+            }
+        });
+
+        // ドロップ時の処理
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('hover'); });
         dropZone.addEventListener('drop', (e) => {
@@ -272,19 +293,3 @@
             ctxSpec.fillText('中高音域 →', 680, 20);
 
             tempCtx.clearRect(0, 0, 760, 180);
-            tempCtx.drawImage(canvasSg, 0, 0);
-            
-            ctxSg.clearRect(0, 0, 760, 180);
-            ctxSg.drawImage(tempCanvas, -1, 0);
-
-            for (let i = 0; i < 180; i++) {
-                let logIndex = Math.floor(Math.pow(i / 180, 2) * (bufferLength / 4));
-                let value = dataArray[logIndex] || 0;
-                
-                let r = value > 140 ? value : 0;
-                let g = value > 50 ? value : 30;
-                let b = value < 80 ? value : 0;
-                
-                ctxSg.fillStyle = `rgb(${r},${g},${b})`;
-                ctxSg.fillRect(760 - 1, 180 - i, 1, 1);
-            }

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>安全第一：低音事故防止チェッカー (Low-End Genba Checker)</title>
+    <style>
+        body {
+            background-color: #1e221a;
+            color: #e0e8d5;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        /* 現場の虎模様ストライプ */
+        .safety-bar {
+            width: 100%;
+            height: 15px;
+            background: repeating-linear-gradient(45deg, #ffcc00, #ffcc00 10px, #111 10px, #111 20px);
+            margin-bottom: 20px;
+        }
+        h1 { color: #00ff66; margin-bottom: 5px; font-size: 26px; font-weight: bold; }
+        .genba-sign {
+            background: #fff;
+            color: #111;
+            padding: 5px 15px;
+            font-weight: bold;
+            border: 3px solid #006633;
+            border-radius: 3px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        #drop-zone {
+            width: 600px;
+            height: 100px;
+            border: 3px dashed #ffcc00;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #252a20;
+            cursor: pointer;
+            font-weight: bold;
+            color: #ffcc00;
+            transition: 0.3s;
+            margin-bottom: 20px;
+        }
+        #drop-zone.hover { background: #353f2d; border-color: #fff; color: #fff; }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 800px;
+            background: #252a20;
+            padding: 20px;
+            border-radius: 5px;
+            border: 2px solid #006633;
+        }
+        .view-title { font-weight: bold; color: #ffcc00; margin-bottom: 5px; border-left: 5px solid #00ff66; padding-left: 8px; }
+        canvas {
+            background: #050803;
+            border: 1px solid #006633;
+            width: 100%;
+            height: 180px;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 10px;
+            background: #1e221a;
+            padding: 10px;
+            border-radius: 3px;
+            align-items: center;
+        }
+        button {
+            background: #00ff66;
+            color: #000;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background: #00cc55; }
+        .info-box {
+            background: #111;
+            padding: 15px;
+            border: 2px solid #ff3333;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+        .yoshi-btn {
+            color: #ff3333;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="safety-bar"></div>
+    <h1>🟢 安全第一：低音事故防止チェッカー</h1>
+    <div class="genba-sign">⚠️ 危険：30Hz以下の居眠り・位相のねじれに注意せよ！</div>
+
+    <div id="drop-zone">【ここにWAVをドロップ】 音響安全確認を行う </div>
+
+    <div class="container" id="analyzer-container" style="display:none;">
+        <div class="controls">
+            <button id="play-btn">再生確認</button>
+            <label><input type="checkbox" id="mono-chk"> 🟢 強制モノラル（クラブ音響シミュレート）</label>
+        </div>
+
+        <div>
+            <div class="view-title">指差呼称 ①：スペクトログラム（低音の残響監視の現場）</div>
+            <canvas id="spectrogram"></canvas>
+        </div>
+
+        <div>
+            <div class="view-title">指差呼称 ②：スペクトラム（過大入力の検知）</div>
+            <canvas id="spectrum"></canvas>
+        </div>
+
+        <div class="info-box">
+            <strong>👷‍♂️ 現場の安全チェックリスト：</strong><br>
+            1. <strong>滝の隙間ヨシ！：</strong>キックが鳴り止んだ後、次のアタックまでの間に一番下のエリアが暗くなっていますか？真っ赤なままだと低音泥沼災害が発生します。<br>
+            2. <strong>モノラル位相ヨシ！：</strong>「強制モノラル」を入れた瞬間、低音がスカスカになる場合はリバーブの広げすぎによる【位相崩壊事故】の現行犯です。
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const container = document.getElementById('analyzer-container');
+        const playBtn = document.getElementById('play-btn');
+        const monoChk = document.getElementById('mono-chk');
+        
+        let audioCtx, audioBuffer, sourceNode, gainNode, stereoNode;
+        let analyser, dataArray, bufferLength;
+        let isPlaying = false;
+        
+        // キャンバス設定
+        const canvasSpec = document.getElementById('spectrum');
+        const ctxSpec = canvasSpec.getContext('2d');
+        const canvasSg = document.getElementById('spectrogram');
+        const ctxSg = canvasSg.getContext('2d');
+        
+        // スペクトログラムのスクロール用
+        let tempCanvas = document.createElement('canvas');
+        let tempCtx = tempCanvas.getContext('2d');
+
+        // ドロップイベント
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('hover'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('hover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.match('audio.*')) {
+                initAudio(file);
+            }
+        });
+
+        async function initAudio(file) {
+            if (isPlaying) stopAudio();
+            
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const arrayBuffer = await file.arrayBuffer();
+            audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // アナライザー設定
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            
+            // キャンバスサイズ同期
+            canvasSpec.width = canvasSpec.parentElement.clientWidth;
+            canvasSpec.height = 200;
+            canvasSg.width = canvasSg.parentElement.clientWidth;
+            canvasSg.height = 200;
+            tempCanvas.width = canvasSg.width;
+            tempCanvas.height = canvasSg.height;
+
+            container.style.display = 'block';
+            dropZone.innerText = `読み込み完了: ${file.name}`;
+            
+            // 描画ループ開始
+            draw();
+        }
+
+        function playAudio() {
+            if (!audioBuffer) return;
+            
+            sourceNode = audioCtx.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.loop = true;
+            
+            gainNode = audioCtx.createGain();
+            
+            // モノラル化のルーティング
+            if (monoChk.checked) {
+                gainNode.channelCount = 1;
+                gainNode.channelCountMode = "explicit";
+            } else {
+                gainNode.channelCount = 2;
+                gainNode.channelCountMode = "max";
+            }
+            
+            sourceNode.connect(analyser);
+            analyser.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            sourceNode.start(0);
+            isPlaying = true;
+            playBtn.innerText = "停止";
+        }
+
+        function stopAudio() {
+            if (sourceNode) {
+                sourceNode.stop();
+                sourceNode.disconnect();
+            }
+            isPlaying = false;
+            playBtn.innerText = "再生";
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (isPlaying) stopAudio(); else playAudio();
+        });
+
+        monoChk.addEventListener('change', () => {
+            if (isPlaying) {
+                stopAudio();
+                playAudio();
+            }
+        });
+
+        function draw() {
+            requestAnimationFrame(draw);
+            if (!analyser) return;
+
+            // ① スペクトラム（周波数）表示の描画
+            analyser.getByteFrequencyData(dataArray);
+            ctxSpec.fillStyle = '#000';
+            ctxSpec.fillRect(0, 0, canvasSpec.width, canvasSpec.height);
+            
+            let barWidth = (canvasSpec.width / bufferLength) * 2.5;
+            let barHeight;
+            let x = 0;
+
+            for(let i = 0; i < bufferLength; i++) {
+                barHeight = dataArray[i];
+                // 低音域を強調して見せるための簡易マッピング
+                ctxSpec.fillStyle = `rgb(${barHeight+50}, 0, ${255-barHeight})`;
+                ctxSpec.fillRect(x, canvasSpec.height - barHeight/1.2, barWidth, barHeight/1.2);
+                x += barWidth + 1;
+            }
+            
+            // 周波数ガイド（目安）
+            ctxSpec.fillStyle = '#888';
+            ctxSpec.font = '10px sans-serif';
+            ctxSpec.fillText('低音 (30Hz-100Hz)', 10, canvasSpec.height - 10);
+            ctxSpec.fillText('中高音 (1kHz-)', canvasSpec.width - 100, canvasSpec.height - 10);
+
+            // ② スペクトログラム（滝）の描画
+            if (isPlaying) {
+                // 既存の絵を左に1ピクセルシフト
+                tempCtx.drawImage(canvasSg, 0, 0);
+                ctxSg.clearRect(0, 0, canvasSg.width, canvasSg.height);
+                ctxSg.drawImage(tempCanvas, -1, 0);
+
+                // 右端に新しい1列を描画
+                for (let i = 0; i < canvasSg.height; i++) {
+                    // 低音を下、高音を上に配置するためのインデックス調整
+                    let logIndex = Math.floor(Math.pow(i / canvasSg.height, 2) * (bufferLength / 4));
+                    let value = dataArray[logIndex] || 0;
+                    
+                    // 色の計算（超低音ほど赤く、中音が黄色、高音が青）
+                    let r = value > 150 ? value : 0;
+                    let g = value;
+                    let b = value < 100 ? value * 2 : 50;
+                    
+                    ctxSg.fillStyle = `rgb(${r},${g},${b})`;
+                    ctxSg.fillRect(canvasSg.width - 1, canvasSg.height - i, 1, 1);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

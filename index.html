@@ -21,6 +21,15 @@
             margin-bottom: 20px;
         }
         h1 { color: #00ff66; margin-bottom: 5px; font-size: 26px; font-weight: bold; }
+        .version-tag {
+            font-size: 12px;
+            color: #888;
+            background: #111;
+            padding: 2px 8px;
+            border-radius: 3px;
+            margin-bottom: 10px;
+            border: 1px solid #333;
+        }
         .genba-sign {
             background: #fff;
             color: #111;
@@ -32,7 +41,7 @@
             font-size: 14px;
         }
         #drop-zone {
-            width: 600px;
+            width: 760px;
             height: 100px;
             border: 3px dashed #ffcc00;
             border-radius: 5px;
@@ -48,7 +57,7 @@
         }
         #drop-zone.hover { background: #353f2d; border-color: #fff; color: #fff; }
         .container {
-            display: flex;
+            display: block;
             flex-direction: column;
             gap: 20px;
             width: 800px;
@@ -61,14 +70,13 @@
         canvas {
             background: #050803;
             border: 1px solid #006633;
-            width: 100%;
-            height: 180px;
             display: block;
+            margin-bottom: 15px;
         }
         .controls {
             display: flex;
             gap: 20px;
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             background: #1e221a;
             padding: 10px;
             border-radius: 3px;
@@ -90,6 +98,7 @@
             border: 2px solid #ff3333;
             font-size: 13px;
             line-height: 1.7;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -97,24 +106,26 @@
 
     <div class="safety-bar"></div>
     <h1>🟢 安全第一：低音事故防止チェッカー</h1>
+    <div class="version-tag">SYSTEM VERSION: v1.0.0-yoshi</div>
     <div class="genba-sign">⚠️ 危険：30Hz以下の居眠り・位相のねじれに注意せよ！</div>
 
     <div id="drop-zone">【ここにWAVをドロップ】 音響安全確認を行う </div>
 
-    <div class="container" id="analyzer-container" style="display:none;">
+    <div class="container" id="analyzer-container">
         <div class="controls">
             <button id="play-btn">再生確認</button>
             <label><input type="checkbox" id="mono-chk"> 🟢 強制モノラル（クラブ音響シミュレート）</label>
+            <span id="status-text" style="margin-left: auto; color: #888; font-size: 12px;">状態：ファイル未選択</span>
         </div>
 
         <div>
             <div class="view-title">指差呼称 ①：スペクトログラム（低音の残響監視の現場）</div>
-            <canvas id="spectrogram"></canvas>
+            <canvas id="spectrogram" width="760" height="180"></canvas>
         </div>
 
         <div>
             <div class="view-title">指差呼称 ②：スペクトラム（過大入力の検知）</div>
-            <canvas id="spectrum"></canvas>
+            <canvas id="spectrum" width="760" height="180"></canvas>
         </div>
 
         <div class="info-box">
@@ -126,9 +137,9 @@
 
     <script>
         const dropZone = document.getElementById('drop-zone');
-        const container = document.getElementById('analyzer-container');
         const playBtn = document.getElementById('play-btn');
         const monoChk = document.getElementById('mono-chk');
+        const statusText = document.getElementById('status-text');
         
         let audioCtx, audioBuffer, sourceNode, gainNode;
         let analyser, dataArray, bufferLength;
@@ -140,7 +151,16 @@
         const ctxSg = canvasSg.getContext('2d');
         
         let tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 760;
+        tempCanvas.height = 180;
         let tempCtx = tempCanvas.getContext('2d');
+
+        ctxSpec.fillStyle = '#050803';
+        ctxSpec.fillRect(0, 0, 760, 180);
+        ctxSg.fillStyle = '#050803';
+        ctxSg.fillRect(0, 0, 760, 180);
+        tempCtx.fillStyle = '#050803';
+        tempCtx.fillRect(0, 0, 760, 180);
 
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('hover'); });
@@ -148,44 +168,31 @@
             e.preventDefault();
             dropZone.classList.remove('hover');
             const files = e.dataTransfer.files;
-            if (files.length > 0 && files[0].type.match('audio.*')) {
+            if (files.length > 0) {
                 initAudio(files[0]);
             }
         });
 
         async function initAudio(file) {
-            if (isPlaying) stopAudio();
-            
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const arrayBuffer = await file.arrayBuffer();
-            audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 2048;
-            bufferLength = analyser.frequencyBinCount;
-            dataArray = new Uint8Array(bufferLength);
-            
-            // コンテナをまず表示させて、DOM上の横幅を確定させる（サイズ0防止）
-            container.style.display = 'block';
-            
-            // 確定した横幅を取得（取得できない場合はデフォルト800）
-            const w = canvasSpec.parentElement.clientWidth || 800;
-            const h = 180;
-            
-            canvasSpec.width = w;
-            canvasSpec.height = h;
-            canvasSg.width = w;
-            canvasSg.height = h;
-            tempCanvas.width = w;
-            tempCanvas.height = h;
-
-            dropZone.innerText = `安全確認対象: ${file.name}`;
-            
-            // 最初の一回だけ背景を黒で塗りつぶす（エラー防止）
-            ctxSg.fillStyle = '#050803';
-            ctxSg.fillRect(0, 0, w, h);
-            tempCtx.fillStyle = '#050803';
-            tempCtx.fillRect(0, 0, w, h);
+            try {
+                if (isPlaying) stopAudio();
+                statusText.innerText = "デコード中...";
+                
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await file.arrayBuffer();
+                audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+                
+                dropZone.innerText = `安全確認対象: ${file.name}`;
+                statusText.innerText = "スタンバイ完了 (ヨシ！)";
+            } catch (err) {
+                statusText.innerText = "エラー：音声ファイルが読めません";
+                console.error(err);
+            }
         }
 
         function playAudio() {
@@ -212,8 +219,8 @@
             sourceNode.start(0);
             isPlaying = true;
             playBtn.innerText = "確認停止";
+            statusText.innerText = "パトロール中...";
             
-            // 再生が始まったら描画ループを回す
             draw();
         }
 
@@ -224,6 +231,7 @@
             }
             isPlaying = false;
             playBtn.innerText = "再生確認";
+            statusText.innerText = "停止中";
         }
 
         playBtn.addEventListener('click', () => {
@@ -241,50 +249,42 @@
             if (!isPlaying || !analyser) return;
             requestAnimationFrame(draw);
 
-            // キャンバスサイズが正常か再チェック（安全対策）
             if (canvasSg.width === 0 || canvasSg.height === 0) return;
 
-            // ① スペクトラム（周波数）の描画
             analyser.getByteFrequencyData(dataArray);
             ctxSpec.fillStyle = '#050803';
-            ctxSpec.fillRect(0, 0, canvasSpec.width, canvasSpec.height);
+            ctxSpec.fillRect(0, 0, 760, 180);
             
-            let barWidth = (canvasSpec.width / bufferLength) * 2.5;
+            let barWidth = (760 / bufferLength) * 2.5;
             let barHeight;
             let x = 0;
 
             for(let i = 0; i < bufferLength; i++) {
                 barHeight = dataArray[i];
                 ctxSpec.fillStyle = `rgb(${barHeight+30}, ${barHeight*0.8}, 30)`;
-                ctxSpec.fillRect(x, canvasSpec.height - barHeight/1.5, barWidth, barHeight/1.5);
+                ctxSpec.fillRect(x, 180 - barHeight/1.5, barWidth, barHeight/1.5);
                 x += barWidth + 1;
             }
             
             ctxSpec.fillStyle = '#888';
             ctxSpec.font = '11px sans-serif';
             ctxSpec.fillText('← 低音域 (30Hz-100Hz)', 10, 20);
-            ctxSpec.fillText('中高音域 →', canvasSpec.width - 80, 20);
+            ctxSpec.fillText('中高音域 →', 680, 20);
 
-            // ② スペクトログラム（滝）の描画（サイズ0チェック通過後なので安全）
-            tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+            tempCtx.clearRect(0, 0, 760, 180);
             tempCtx.drawImage(canvasSg, 0, 0);
             
-            ctxSg.clearRect(0, 0, canvasSg.width, canvasSg.height);
+            ctxSg.clearRect(0, 0, 760, 180);
             ctxSg.drawImage(tempCanvas, -1, 0);
 
-            for (let i = 0; i < canvasSg.height; i++) {
-                let logIndex = Math.floor(Math.pow(i / canvasSg.height, 2) * (bufferLength / 4));
+            for (let i = 0; i < 180; i++) {
+                let logIndex = Math.floor(Math.pow(i / 180, 2) * (bufferLength / 4));
                 let value = dataArray[logIndex] || 0;
                 
-                // 現場カラー（緑から黄色、危険な低音過多は赤へ）
                 let r = value > 140 ? value : 0;
                 let g = value > 50 ? value : 30;
                 let b = value < 80 ? value : 0;
                 
                 ctxSg.fillStyle = `rgb(${r},${g},${b})`;
-                ctxSg.fillRect(canvasSg.width - 1, canvasSg.height - i, 1, 1);
+                ctxSg.fillRect(760 - 1, 180 - i, 1, 1);
             }
-        }
-    </script>
-</body>
-</html>
